@@ -6,7 +6,7 @@
 #include <concepts>
 #include <type_traits>
 
-namespace DOF {
+namespace dof {
 
 // Forward declarations
 class IServoController;
@@ -130,4 +130,4 @@ constexpr ServoID indexToServoID(uint8_t index) {
     return static_cast<ServoID>(index);
 }
 
-} // namespace DOF
+} // namespace dof

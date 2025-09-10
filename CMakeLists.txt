@@ -23,15 +23,6 @@ else()
     set(LOG_VERBOSITY "DEBUG")
 endif()
 
-if (NOT DEFINED MODULES_GLOBAL)
-    set(MODULES_GLOBAL ${CMAKE_CURRENT_SOURCE_DIR}/modules)
-endif()
-
-if (MODULES_USE_GLOBAL)
-    set(MODULES ${MODULES_GLOBAL})
-else()
-    set(MODULES ${CMAKE_CURRENT_SOURCE_DIR}/modules)
-endif()
 
 set(CMAKE_SCRIPTS_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(${CMAKE_SCRIPTS_PATH}/make.cmake)
@@ -39,43 +30,7 @@ include(${CMAKE_SCRIPTS_PATH}/make.cmake)
 definePaths(${PROJECT_NAME})
 defineProjectIncludes(${CMAKE_CURRENT_BINARY_DIR})
 
-# DOF Firmware Configuration
-set(DOF_CONFIGURATION "full" CACHE STRING "DOF firmware configuration")
-if(DOF_CONFIGURATION MATCHES "full")
-    set(WITH_COMMUNICATION ON)
-    set(WITH_TELEMETRY ON)
-    set(WITH_GIMBAL_CONTROL ON)
-elseif(DOF_CONFIGURATION MATCHES "gimbal-only")
-    set(WITH_GIMBAL_CONTROL ON)
-elseif(DOF_CONFIGURATION MATCHES "minimal")
-    set(WITH_COMMUNICATION ON)
-    set(WITH_TELEMETRY ON)
-endif()
 
-# Enable coroutines support (if available)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcoroutines")
-endif()
-
-# Define STM32 compiler flags
-set(STM32_FLAGS
-    -mcpu=cortex-m4
-    -mthumb
-    -mfpu=fpv4-sp-d16
-    -mfloat-abi=hard
-    -fdata-sections
-    -ffunction-sections
-    -Wall
-    -Wextra
-    -Wpedantic
-    -fno-exceptions
-    -fno-rtti
-)
-
-# Define additional STM32 linker flags
-set(STM32_ADDITIONAL_LINKER_FLAGS
-    "-Wl,--defsym=malloc_getpagesize_P=0x80"
-)
 
 # Common STM32 definitions
 add_compile_definitions(

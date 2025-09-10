@@ -1,19 +1,16 @@
 # DOF Gimbal Control Component
 
-add_library(dof-gimbal-control STATIC
-    controllers/pca9685_servo_controller.cpp
-    controllers/pwm_servo_controller.cpp
-    controllers/dof_robotic_arm.cpp
+add_library(dof-gimbal STATIC
+    pca9685_servo.cpp
 )
 
-create_stm32_target(dof-gimbal-control)
+create_stm32_target(dof-gimbal)
 
 # Set component-specific include directories
-target_include_directories(dof-gimbal-control PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/types
-    ${CMAKE_CURRENT_SOURCE_DIR}/controllers
-    ${CMAKE_CURRENT_SOURCE_DIR}/configs
+target_include_directories(dof-gimbal PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
 )
 
 # Link with HAL library
-target_link_libraries(dof-gimbal-control PUBLIC stm32_hal)
+target_link_libraries(dof-gimbal PUBLIC stm32_hal)

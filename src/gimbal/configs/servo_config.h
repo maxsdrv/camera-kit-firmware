@@ -3,7 +3,7 @@
 #include "../types/servo_types.h"
 #include <array>
 
-namespace DOF {
+namespace dof {
 
 /**
  * @brief Default servo configurations for 6-DOF robotic arm
@@ -235,4 +235,4 @@ inline constexpr uint8_t getServoPWMChannel(ServoID id) {
     return 0;
 }
 
-} // namespace DOF
+} // namespace dof
