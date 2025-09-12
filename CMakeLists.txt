@@ -77,9 +77,5 @@ target_include_directories(stm32_hal PUBLIC
 
 add_subdirectory(src)
 
-if (BUILD_EXAMPLES)
-    add_subdirectory(examples)
-endif()
-
 # Enable compile commands for IDE support
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
