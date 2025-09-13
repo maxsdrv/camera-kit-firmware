@@ -19,7 +19,7 @@
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
-#include "general_stm32_config.h"
+#include "main.h"
 /* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */

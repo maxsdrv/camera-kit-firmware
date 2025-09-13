@@ -1,8 +1,8 @@
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * @file           : general_stm32_config.h
-  * @brief          : Header for main.cpp file.
+  * @file           : main.h
+  * @brief          : Header for main.c file.
   *                   This file contains the common defines of the application.
   ******************************************************************************
   * @attention

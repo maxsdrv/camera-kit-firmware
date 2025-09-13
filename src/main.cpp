@@ -6,201 +6,65 @@
  */
 
 #include "pca9685_servo.h"
+#include "commands.h"
 #include <cstring>
-#include <cstdio>
 
 // Hardware handles
 UART_HandleTypeDef huart1;
 I2C_HandleTypeDef hi2c1;
 TIM_HandleTypeDef htim2;
 
-// UART command buffer
-#define UART_CMD_BUFFER_SIZE 64
-static uint8_t uart_cmd_buffer[UART_CMD_BUFFER_SIZE];
-static volatile uint8_t uart_cmd_index = 0;
-static volatile bool command_ready = false;
 
 // Function prototypes
+static void SystemClock_Config();
 static void MX_GPIO_Init();
 static void MX_USART1_UART_Init();
 static void MX_I2C1_Init();
 static void MX_TIM2_Init();
-static void SystemClock_Config();
 
-static void ProcessUARTCommand();
-static void SendUARTResponse(const char* response);
 
 [[noreturn]] int main()
 {
     // Initialize HAL
     HAL_Init();
 
-    // Configure the system clock
+    // Configure the system clock FIRST
     SystemClock_Config();
 
     // Initialize peripherals
     MX_GPIO_Init();
     MX_USART1_UART_Init();
-    
-    // Skip I2C recovery for now - test direct initialization
-    
     MX_I2C1_Init();
     MX_TIM2_Init();
 
     // Initialize PCA9685 servo controller
-    if (!PCA9685_Init(&hi2c1)) {
-        Error_Handler();
+    if (!PCA9685_Init(&hi2c1))
+    {
+        // Don't halt system if PCA9685 fails - just continue without gimbal
+        // This allows UART commands to work for debugging
+        // Error_Handler();
     }
 
-    // Start UART interrupt for command reception
-    HAL_UART_Receive_IT(&huart1, &uart_cmd_buffer[0], 1);
+    // Initialize Commands system
+    Commands::Init(&huart1);
+    Commands::StartReceiving();
 
     // Start timer for heartbeat
-    if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK) {
+    if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
+    {
         Error_Handler();
     }
 
-    // Turn on status LED
-    HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-
-    // Main firmware loop
     while (true)
     {
         // Process UART commands
-        // if (command_ready) {
-        // ProcessUARTCommand();
-        // command_ready = false;
-        // uart_cmd_index = 0;
-        // // Restart UART reception
-        // HAL_UART_Receive_IT(&huart1, &uart_cmd_buffer[0], 1);
-        // }
+        Commands::ProcessCommands();
 
         // Small delay to prevent CPU overload
         HAL_Delay(1);
     }
 }
 
-/**
- * @brief Process incoming UART command
- */
-static void ProcessUARTCommand()
-{
-    auto cmd = reinterpret_cast<char *>(uart_cmd_buffer);
-    
-    // New command format examples:
-    // "S0090" - Set servo 0 to 90 degrees
-    // "H" - Home all servos
-    // "?" - Get status
-    // "E" - Emergency stop
-    // "R" - Clear emergency stop (resume)
-    // "P1" - Camera forward preset
-    // "P2" - Camera down preset
-    // "P0" - Rest position preset
-    
-    if (cmd[0] == 'S' && uart_cmd_index >= 5) {
-        // Servo command: S<id><angle_degrees>
-        uint8_t servo_id = cmd[1] - '0';
-        uint16_t angle_degrees = (cmd[2] - '0') * 100 + (cmd[3] - '0') * 10 + (cmd[4] - '0');
-        
-        if (servo_id < 6 && angle_degrees <= 180) {
-            if (PCA9685_SetServoAngle(servo_id, angle_degrees)) {
-                SendUARTResponse("OK\n");
-            } else {
-                SendUARTResponse("ERR_CONSTRAINT\n");
-            }
-        } else {
-            SendUARTResponse("ERR_PARAM\n");
-        }
-    }
-    else if (cmd[0] == 'H') {
-        // Home command
-        if (PCA9685_HomeAllServos()) {
-            SendUARTResponse("HOME_OK\n");
-        } else {
-            SendUARTResponse("HOME_ERR\n");
-        }
-    }
-    else if (cmd[0] == 'E') {
-        // Emergency stop
-        PCA9685_EmergencyStop();
-        SendUARTResponse("ESTOP_ACTIVE\n");
-    }
-    else if (cmd[0] == 'R') {
-        // Resume from emergency stop
-        if (PCA9685_ClearEmergencyStop()) {
-            SendUARTResponse("RESUME_OK\n");
-        } else {
-            SendUARTResponse("RESUME_ERR\n");
-        }
-    }
-    else if (cmd[0] == 'P' && uart_cmd_index >= 2) {
-        // Preset command: P<preset_id>
-        uint8_t preset_id = cmd[1] - '0';
-        bool success = false;
-        
-        switch (preset_id) {
-            case 0: // Rest position
-                success = PCA9685_SetServoAngle(0, 90) &&  // Base rotation
-                         PCA9685_SetServoAngle(1, 30) &&  // Shoulder pitch (folded)
-                         PCA9685_SetServoAngle(2, 90) &&  // Shoulder roll
-                         PCA9685_SetServoAngle(3, 160) && // Elbow pitch (folded)
-                         PCA9685_SetServoAngle(4, 30) &&  // Wrist pitch (folded)
-                         PCA9685_SetServoAngle(5, 90);    // Wrist roll
-                break;
-                
-            case 1: // Camera forward
-                success = PCA9685_SetServoAngle(0, 90) &&  // Base rotation
-                         PCA9685_SetServoAngle(1, 90) &&  // Shoulder pitch
-                         PCA9685_SetServoAngle(2, 90) &&  // Shoulder roll
-                         PCA9685_SetServoAngle(3, 90) &&  // Elbow pitch
-                         PCA9685_SetServoAngle(4, 90) &&  // Wrist pitch
-                         PCA9685_SetServoAngle(5, 90);    // Wrist roll
-                break;
-                
-            case 2: // Camera down
-                success = PCA9685_SetServoAngle(0, 90) &&  // Base rotation
-                         PCA9685_SetServoAngle(1, 90) &&  // Shoulder pitch
-                         PCA9685_SetServoAngle(2, 90) &&  // Shoulder roll
-                         PCA9685_SetServoAngle(3, 90) &&  // Elbow pitch
-                         PCA9685_SetServoAngle(4, 150) && // Wrist pitch (pointing down)
-                         PCA9685_SetServoAngle(5, 90);    // Wrist roll
-                break;
-                
-            default:
-                SendUARTResponse("ERR_PRESET\n");
-                return;
-        }
-        
-        if (success) {
-            SendUARTResponse("PRESET_OK\n");
-        } else {
-            SendUARTResponse("PRESET_ERR\n");
-        }
-    }
-    else if (cmd[0] == '?') {
-        // Status command - now shows angles and status
-        char status[256];
-        snprintf(status, sizeof(status), 
-                "STATUS:S0=%s,S1=%s,S2=%s,S3=%s,S4=%s,S5=%s\n",
-                PCA9685_GetServoStatus(0), PCA9685_GetServoStatus(1), PCA9685_GetServoStatus(2),
-                PCA9685_GetServoStatus(3), PCA9685_GetServoStatus(4), PCA9685_GetServoStatus(5));
-        SendUARTResponse(status);
-    }
-    else {
-        SendUARTResponse("ERR_CMD\n");
-    }
-}
-
-/**
- * @brief Send response via UART
- */
-static void SendUARTResponse(const char* response)
-{
-    HAL_UART_Transmit(&huart1,
-        reinterpret_cast<const uint8_t *>(*response),
-        strlen(response),
-        100);
-}
 
 /**
  * @brief System Clock Configuration
@@ -234,8 +98,8 @@ void SystemClock_Config()
 
     /** Initializes the CPU, AHB and APB buses clocks
     */
-    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                                |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
+                                  | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
     RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
     RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
@@ -252,6 +116,7 @@ void SystemClock_Config()
  */
 void MX_USART1_UART_Init()
 {
+    __HAL_RCC_USART1_CLK_ENABLE();
     huart1.Instance = USART1;
     huart1.Init.BaudRate = 115200;
     huart1.Init.WordLength = UART_WORDLENGTH_8B;
@@ -264,6 +129,10 @@ void MX_USART1_UART_Init()
     {
         Error_Handler();
     }
+
+    /* Enable USART1 interrupt in NVIC */
+    HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
 }
 
 /**
@@ -271,6 +140,9 @@ void MX_USART1_UART_Init()
  */
 void MX_I2C1_Init()
 {
+    /* Enable I2C1 peripheral clock */
+    __HAL_RCC_I2C1_CLK_ENABLE();
+
     hi2c1.Instance = I2C1;
     hi2c1.Init.ClockSpeed = 100000;
     hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
@@ -280,10 +152,17 @@ void MX_I2C1_Init()
     hi2c1.Init.OwnAddress2 = 0;
     hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
     hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+
     if (HAL_I2C_Init(&hi2c1) != HAL_OK)
     {
         Error_Handler();
     }
+
+    /* Enable I2C1 interrupt in NVIC */
+    HAL_NVIC_SetPriority(I2C1_EV_IRQn, 2, 0);
+    HAL_NVIC_EnableIRQ(I2C1_EV_IRQn);
+    HAL_NVIC_SetPriority(I2C1_ER_IRQn, 2, 0);
+    HAL_NVIC_EnableIRQ(I2C1_ER_IRQn);
 }
 
 /**
@@ -315,6 +194,10 @@ void MX_TIM2_Init()
     {
         Error_Handler();
     }
+
+    /* Enable TIM2 interrupt in NVIC */
+    HAL_NVIC_SetPriority(TIM2_IRQn, 1, 0);
+    HAL_NVIC_EnableIRQ(TIM2_IRQn);
 }
 
 /**
@@ -340,12 +223,21 @@ void MX_GPIO_Init()
     HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
     /*Configure GPIO pins : USART_TX_Pin USART_RX_Pin */
-    GPIO_InitStruct.Pin = USART_TX_Pin|USART_RX_Pin;
+    // GPIO_InitStruct.Pin = USART_TX_Pin | USART_RX_Pin;
+    GPIO_InitStruct.Pin = GPIO_PIN_9 | GPIO_PIN_10;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
+    GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    /*Configure GPIO pins : I2C1_SCL I2C1_SDA */
+    GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9; // PB8=SCL, PB9=SDA
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;        // Open drain for I2C
+    GPIO_InitStruct.Pull = GPIO_PULLUP;            // Internal pull-up
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1; // I2C1 alternate function
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     /*Configure GPIO pin : LD2_Pin */
     GPIO_InitStruct.Pin = LD2_Pin;
@@ -361,68 +253,21 @@ void MX_GPIO_Init()
 void Error_Handler(void)
 {
     __disable_irq();
-    while (1)
+
+    while (true)
     {
+        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+
+        // Simple delay loop (approximately 500ms at 84MHz)
+        for (volatile uint32_t i = 0; i < 10000000; i++);
+
         HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-        
-        for(volatile int i = 0; i < 100000; i += 1);
-        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-        for(volatile int i = 0; i < 100000; i += 1);
+
+        // Simple delay loop (approximately 500ms at 84MHz)
+        for (volatile uint32_t i = 0; i < 10000000; i++);
     }
 }
 
-/**
- * @brief Timer interrupt callback for heartbeat
- */
-extern "C" void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-    if (htim->Instance == TIM2) {
-        // Heartbeat - toggle LED every 100 interrupts (1Hz at 100Hz timer)
-        static uint16_t counter = 0;
-        counter++;
-        if (counter >= 100) {
-            HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-            counter = 0;
-        }
-    }
-}
-
-/**
- * @brief GPIO interrupt callback for the emergency stop button
- */
-extern "C" void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if (GPIO_Pin == B1_Pin) {
-        // Emergency stop - activate emergency stop mode
-        PCA9685_EmergencyStop();
-        SendUARTResponse("ESTOP_BUTTON\n");
-    }
-}
-
-/**
- * @brief UART receive complete callback
- */
-extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart->Instance == USART1) {
-        // Check for command terminator
-        if (uart_cmd_buffer[uart_cmd_index] == '\n' || uart_cmd_buffer[uart_cmd_index] == '\r') {
-            uart_cmd_buffer[uart_cmd_index] = '\0';
-            command_ready = true;
-            return;
-        }
-
-        // Continue receiving if not at end of buffer
-        if (uart_cmd_index < UART_CMD_BUFFER_SIZE - 1) {
-            uart_cmd_index = uart_cmd_index + 1;
-            HAL_UART_Receive_IT(&huart1, &uart_cmd_buffer[uart_cmd_index], 1);
-        } else {
-            // Buffer full, reset
-            uart_cmd_index = 0;
-            HAL_UART_Receive_IT(&huart1, &uart_cmd_buffer[0], 1);
-        }
-    }
-}
 
 #ifdef  USE_FULL_ASSERT
 /**
@@ -432,7 +277,7 @@ extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   * @param  line: assert_param error line source number
   * @retval None
   */
-void assert_failed(uint8_t *file, uint32_t line)
+void assert_failed(uint8_t* file, uint32_t line)
 {
     /* USER CODE BEGIN 6 */
     /* User can add his own implementation to report the file name and line number,
